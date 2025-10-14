@@ -1,0 +1,102 @@
+name: Publish Deployment Engine Image
+
+on:
+  repository_dispatch:
+    types:
+      - deployment-engine.publish
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ${{ github.event.client_payload.registry }}
+  IMAGE_NAME: ${{ github.event.client_payload.image_name }}
+  CONTAINER_TAG: ${{ github.event.client_payload.tag }}
+  VERSION: ${{ github.event.client_payload.version }}
+  PLATFORMS: ${{ github.event.client_payload.platforms }}
+  SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+  SOURCE_OWNER: ${{ github.event.client_payload.source_owner }}
+  SOURCE_REPO_NAME: ${{ github.event.client_payload.source_repo_name }}
+  SOURCE_REF: ${{ github.event.client_payload.source_ref }}
+  SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
+
+jobs:
+  publish:
+    name: Build and Publish Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fake-radius
+        uses: actions/checkout@v4
+
+      - name: Display payload
+        run: |
+          echo "Publishing from commit ${SOURCE_SHA} of ${SOURCE_REPO}"
+          echo "Tag: ${CONTAINER_TAG}"
+          echo "Registry: ${REGISTRY}"
+          echo "Platforms: ${PLATFORMS}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: ${{ env.PLATFORMS }}
+
+      - name: Create Radius installation token
+        id: radius-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-packages: write
+
+      - name: Create source installation token
+        id: source-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ env.SOURCE_OWNER }}
+          repositories: ${{ env.SOURCE_REPO_NAME }}
+
+      - name: Log in to GHCR
+        run: echo "${{ steps.radius-token.outputs.token }}" | docker login ghcr.io -u x-access-token --password-stdin
+
+      - name: Checkout deployment-engine source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_SHA }}
+          token: ${{ steps.source-token.outputs.token }}
+          path: source
+
+      - name: Build container image
+        working-directory: source
+        run: |
+          ./.github/scripts/build-container.sh \
+            --tag="${CONTAINER_TAG}" \
+            --version="${VERSION}" \
+            --platforms="${PLATFORMS}" \
+            --registry="${REGISTRY}"
+
+      - name: Push container image
+        working-directory: source
+        run: |
+          ./.github/scripts/push-container.sh \
+            --registry="${REGISTRY}" \
+            --tag="${CONTAINER_TAG}" \
+            --version="${VERSION}" \
+            --platforms="${PLATFORMS}"
+
+      - name: Publish summary
+        run: |
+          echo "### GHCR Publish" >> $GITHUB_STEP_SUMMARY
+          echo "- Source repo: ${SOURCE_REPO}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${SOURCE_SHA}" >> $GITHUB_STEP_SUMMARY
+          echo "- Registry: ${REGISTRY}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: ${CONTAINER_TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "- Platforms: ${PLATFORMS}" >> $GITHUB_STEP_SUMMARY
