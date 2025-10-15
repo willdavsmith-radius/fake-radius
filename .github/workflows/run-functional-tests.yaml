@@ -1,0 +1,157 @@
+name: Simulate Functional Tests
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [de-functional-test]
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_STATUS_CONTEXT: functional-tests
+
+jobs:
+  functional-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Capture payload details
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const payload = context.payload.client_payload || {};
+            const status = payload.status_payload || {};
+
+            const sourceRepo = status.source_repository || '';
+            const [owner = '', repo = ''] = sourceRepo.split('/');
+            const targetSha = status.target_sha || '';
+            const statusContext = status.status_context || process.env.DEFAULT_STATUS_CONTEXT;
+            const eventType = context.payload.action || payload.event_type || context.eventName;
+            const shouldFail = ['true', '1', true].includes(payload.force_failure);
+
+            core.setOutput('image', payload.de_image || '');
+            core.setOutput('tag', payload.de_tag || '');
+            core.setOutput('event-type', eventType);
+            core.setOutput('status-context', statusContext);
+            core.setOutput('source-owner', owner);
+            core.setOutput('source-repo', repo);
+            core.setOutput('source-full', sourceRepo);
+            core.setOutput('target-sha', targetSha);
+            core.setOutput('has-status', owner && repo && targetSha ? 'true' : 'false');
+            core.setOutput('should-fail', shouldFail ? 'true' : 'false');
+
+      - name: Get commit status token
+        id: status-token
+        if: ${{ steps.payload.outputs.has-status == 'true' && secrets.GH_APP_ID != '' && secrets.GH_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ steps.payload.outputs.source-owner }}
+          repositories: ${{ steps.payload.outputs.source-repo }}
+          permission-actions: write
+
+      - name: Set status to pending
+        if: ${{ steps.payload.outputs.has-status == 'true' && steps.status-token.outputs.token != '' }}
+        uses: actions/github-script@v7
+        env:
+          STATUS_OWNER: ${{ steps.payload.outputs.source-owner }}
+          STATUS_REPO: ${{ steps.payload.outputs.source-repo }}
+          STATUS_TARGET_SHA: ${{ steps.payload.outputs.target-sha }}
+          STATUS_CONTEXT: ${{ steps.payload.outputs.status-context }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ steps.status-token.outputs.token }}
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: process.env.STATUS_OWNER,
+              repo: process.env.STATUS_REPO,
+              sha: process.env.STATUS_TARGET_SHA,
+              state: 'pending',
+              context: process.env.STATUS_CONTEXT,
+              description: 'Functional tests are running',
+              target_url: process.env.TARGET_URL
+            });
+
+      - name: Simulate functional tests
+        id: simulate
+        env:
+          DE_IMAGE: ${{ steps.payload.outputs.image }}
+          DE_TAG: ${{ steps.payload.outputs.tag }}
+          SHOULD_FAIL: ${{ steps.payload.outputs.should-fail }}
+        run: |
+          set -euo pipefail
+          echo "Simulating functional tests..."
+          echo "Image: ${DE_IMAGE:-<not provided>}"
+          echo "Tag: ${DE_TAG:-<not provided>}"
+          sleep 5
+          if [ "${SHOULD_FAIL}" = "true" ]; then
+            echo "Demo failure requested."
+            exit 1
+          fi
+          echo "Simulation complete."
+
+      - name: Final status update
+        if: ${{ steps.payload.outputs.has-status == 'true' && steps.status-token.outputs.token != '' && always() }}
+        uses: actions/github-script@v7
+        env:
+          STATUS_OWNER: ${{ steps.payload.outputs.source-owner }}
+          STATUS_REPO: ${{ steps.payload.outputs.source-repo }}
+          STATUS_TARGET_SHA: ${{ steps.payload.outputs.target-sha }}
+          STATUS_CONTEXT: ${{ steps.payload.outputs.status-context }}
+          JOB_STATUS: ${{ job.status }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ steps.status-token.outputs.token }}
+          script: |
+            const stateMap = { success: 'success', failure: 'failure', cancelled: 'error' };
+            const descMap = {
+              success: 'Functional tests passed',
+              failure: 'Functional tests failed',
+              error: 'Functional tests cancelled'
+            };
+            const jobStatus = process.env.JOB_STATUS.toLowerCase();
+            const state = stateMap[jobStatus] || 'error';
+            const description = descMap[state];
+
+            await github.rest.repos.createCommitStatus({
+              owner: process.env.STATUS_OWNER,
+              repo: process.env.STATUS_REPO,
+              sha: process.env.STATUS_TARGET_SHA,
+              state,
+              context: process.env.STATUS_CONTEXT,
+              description,
+              target_url: process.env.TARGET_URL
+            });
+
+      - name: Summarize run
+        if: ${{ always() }}
+        env:
+          JOB_STATUS: ${{ job.status }}
+          EVENT_TYPE: ${{ steps.payload.outputs['event-type'] }}
+          SOURCE_REPO: ${{ steps.payload.outputs['source-full'] }}
+          TARGET_SHA: ${{ steps.payload.outputs['target-sha'] }}
+          STATUS_CONTEXT: ${{ steps.payload.outputs['status-context'] }}
+          DE_IMAGE: ${{ steps.payload.outputs.image }}
+          DE_TAG: ${{ steps.payload.outputs.tag }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload || {}) }}
+        run: |
+          {
+            echo "### Functional Test Simulation";
+            echo "- **Result**: ${JOB_STATUS}";
+            echo "- **Event**: ${EVENT_TYPE}";
+            echo "- **Image**: ${DE_IMAGE:-<not provided>} (${DE_TAG:-<not provided>})";
+            if [ -n "${SOURCE_REPO}" ]; then
+              echo "- **Status Target**: ${SOURCE_REPO}@${TARGET_SHA:-<sha missing>}";
+              echo "- **Status Context**: ${STATUS_CONTEXT}";
+            fi;
+            echo "";
+            echo "<details><summary>Dispatch Payload</summary>";
+            echo "";
+            echo '```json';
+            echo "${CLIENT_PAYLOAD}";
+            echo '```';
+            echo "</details>";
+          } >> "$GITHUB_STEP_SUMMARY"
