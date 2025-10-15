@@ -80,8 +80,12 @@ jobs:
           SOURCE_REPO: ${{ steps.payload.outputs.source-repo }}
           SOURCE_REF: ${{ steps.payload.outputs.source-ref }}
           SOURCE_SHA: ${{ steps.payload.outputs.source-sha }}
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload || {}) }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
+          PAYLOAD_DISPLAY="${CLIENT_PAYLOAD}"
+          if [ "${PAYLOAD_DISPLAY}" = "null" ] || [ -z "${PAYLOAD_DISPLAY}" ]; then
+            PAYLOAD_DISPLAY="{}"
+          fi
           {
             echo "### Deployment Engine Image Publish";
             echo "- **Image**: ${REGISTRY}/${IMAGE_NAME}:${TAG}";
@@ -97,7 +101,7 @@ jobs:
             echo "<details><summary>Dispatch Payload</summary>";
             echo "";
             echo '```json';
-            echo "${CLIENT_PAYLOAD}";
+            echo "${PAYLOAD_DISPLAY}";
             echo '```';
             echo "</details>";
           } >> "$GITHUB_STEP_SUMMARY"

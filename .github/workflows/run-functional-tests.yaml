@@ -136,8 +136,12 @@ jobs:
           STATUS_CONTEXT: ${{ steps.payload.outputs['status-context'] }}
           DE_IMAGE: ${{ steps.payload.outputs.image }}
           DE_TAG: ${{ steps.payload.outputs.tag }}
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload || {}) }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
+          PAYLOAD_DISPLAY="${CLIENT_PAYLOAD}"
+          if [ "${PAYLOAD_DISPLAY}" = "null" ] || [ -z "${PAYLOAD_DISPLAY}" ]; then
+            PAYLOAD_DISPLAY="{}"
+          fi
           {
             echo "### Functional Test Simulation";
             echo "- **Result**: ${JOB_STATUS}";
@@ -151,7 +155,7 @@ jobs:
             echo "<details><summary>Dispatch Payload</summary>";
             echo "";
             echo '```json';
-            echo "${CLIENT_PAYLOAD}";
+            echo "${PAYLOAD_DISPLAY}";
             echo '```';
             echo "</details>";
           } >> "$GITHUB_STEP_SUMMARY"
