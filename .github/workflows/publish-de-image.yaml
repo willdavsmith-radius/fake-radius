@@ -1,0 +1,103 @@
+name: Publish Deployment Engine Image
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [deployment-engine.publish]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Capture payload
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const payload = context.payload.client_payload || {};
+            if (!payload.registry || !payload.image_name || !payload.tag) {
+              core.setFailed('registry, image_name, and tag are required in the dispatch payload.');
+              return;
+            }
+
+            const platforms = payload.platforms
+              ? String(payload.platforms).split(',').map(p => p.trim()).filter(Boolean)
+              : [];
+
+            const publish = (key, value) => core.setOutput(key, value || '');
+
+            publish('registry', payload.registry);
+            publish('image-name', payload.image_name);
+            publish('tag', payload.tag);
+            publish('version', payload.version || '');
+            publish('platforms', JSON.stringify(platforms));
+            publish('source-repo', payload.source_repo || '');
+            publish('source-owner', payload.source_owner || '');
+            publish('source-repo-name', payload.source_repo_name || '');
+            publish('source-ref', payload.source_ref || '');
+            publish('source-sha', payload.source_sha || '');
+
+      - name: Show publish parameters
+        run: |
+          echo "Registry       : ${{ steps.payload.outputs.registry }}"
+          echo "Image name     : ${{ steps.payload.outputs.image-name }}"
+          echo "Tag            : ${{ steps.payload.outputs.tag }}"
+          echo "Version        : ${{ steps.payload.outputs.version || '<not provided>' }}"
+          echo "Source repo    : ${{ steps.payload.outputs.source-repo || '<not provided>' }}"
+          echo "Source ref     : ${{ steps.payload.outputs.source-ref || '<not provided>' }}"
+          echo "Source SHA     : ${{ steps.payload.outputs.source-sha || '<not provided>' }}"
+
+      - name: Simulate image publish
+        env:
+          REGISTRY: ${{ steps.payload.outputs.registry }}
+          IMAGE_NAME: ${{ steps.payload.outputs.image-name }}
+          TAG: ${{ steps.payload.outputs.tag }}
+          PLATFORMS: ${{ steps.payload.outputs.platforms }}
+        run: |
+          set -euo pipefail
+          FULL_REF="${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          echo "Preparing to push ${FULL_REF}"
+          if [ -n "${PLATFORMS}" ] && [ "${PLATFORMS}" != "[]" ]; then
+            echo "Requested platforms: ${PLATFORMS}"
+          fi
+          echo "(Demo) docker pull ${FULL_REF}"
+          echo "(Demo) docker tag  ${FULL_REF} ${FULL_REF}"
+          echo "(Demo) docker push ${FULL_REF}"
+          echo "Image publish simulation complete."
+
+      - name: Summarize publish
+        env:
+          REGISTRY: ${{ steps.payload.outputs.registry }}
+          IMAGE_NAME: ${{ steps.payload.outputs.image-name }}
+          TAG: ${{ steps.payload.outputs.tag }}
+          VERSION: ${{ steps.payload.outputs.version }}
+          PLATFORMS: ${{ steps.payload.outputs.platforms }}
+          SOURCE_REPO: ${{ steps.payload.outputs.source-repo }}
+          SOURCE_REF: ${{ steps.payload.outputs.source-ref }}
+          SOURCE_SHA: ${{ steps.payload.outputs.source-sha }}
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload || {}) }}
+        run: |
+          {
+            echo "### Deployment Engine Image Publish";
+            echo "- **Image**: ${REGISTRY}/${IMAGE_NAME}:${TAG}";
+            echo "- **Version**: ${VERSION:-<not provided>}";
+            if [ "${PLATFORMS}" != "" ] && [ "${PLATFORMS}" != "[]" ]; then
+              echo "- **Platforms**: ${PLATFORMS}";
+            fi;
+            if [ -n "${SOURCE_REPO}" ]; then
+              echo "- **Source Repository**: ${SOURCE_REPO} (${SOURCE_REF:-ref missing})";
+              echo "- **Source SHA**: ${SOURCE_SHA:-<not provided>}";
+            fi;
+            echo "";
+            echo "<details><summary>Dispatch Payload</summary>";
+            echo "";
+            echo '```json';
+            echo "${CLIENT_PAYLOAD}";
+            echo '```';
+            echo "</details>";
+          } >> "$GITHUB_STEP_SUMMARY"
