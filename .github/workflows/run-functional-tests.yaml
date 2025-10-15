@@ -14,6 +14,9 @@ env:
 jobs:
   functional-tests:
     runs-on: ubuntu-latest
+    env:
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
 
     steps:
       - name: Capture payload details
@@ -44,11 +47,11 @@ jobs:
 
       - name: Get commit status token
         id: status-token
-        if: ${{ steps.payload.outputs.has-status == 'true' && secrets.GH_APP_ID != '' && secrets.GH_APP_PRIVATE_KEY != '' }}
+        if: ${{ steps.payload.outputs.has-status == 'true' && env.GH_APP_ID != '' && env.GH_APP_PRIVATE_KEY != '' }}
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          app-id: ${{ env.GH_APP_ID }}
+          private-key: ${{ env.GH_APP_PRIVATE_KEY }}
           owner: ${{ steps.payload.outputs.source-owner }}
           repositories: ${{ steps.payload.outputs.source-repo }}
           permission-actions: write
