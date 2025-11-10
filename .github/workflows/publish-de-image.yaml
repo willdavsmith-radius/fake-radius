@@ -25,17 +25,24 @@ jobs:
               return;
             }
 
-            const platforms = payload.platforms
-              ? String(payload.platforms).split(',').map(p => p.trim()).filter(Boolean)
-              : [];
-
             const publish = (key, value) => core.setOutput(key, value || '');
 
-            publish('registry', payload.registry);
+            const owner = (context.repo.owner || '').toLowerCase();
+            const imageName = (payload.image_name || '').toLowerCase();
+            const registry = payload.registry.replace(/\/+$/, '');
+            const sourceImage = `${registry}/${payload.image_name}`;
+            const targetImage = owner && imageName ? `ghcr.io/${owner}/${imageName}` : '';
+            if (!targetImage) {
+              core.setFailed('Unable to determine GHCR image path for publish.');
+              return;
+            }
+
+            publish('registry', registry);
             publish('image-name', payload.image_name);
             publish('tag', payload.tag);
             publish('version', payload.version || '');
-            publish('platforms', JSON.stringify(platforms));
+            publish('source-image', sourceImage);
+            publish('target-image', targetImage);
             publish('source-repo', payload.source_repo || '');
             publish('source-owner', payload.source_owner || '');
             publish('source-repo-name', payload.source_repo_name || '');
@@ -48,27 +55,65 @@ jobs:
           echo "Image name     : ${{ steps.payload.outputs.image-name }}"
           echo "Tag            : ${{ steps.payload.outputs.tag }}"
           echo "Version        : ${{ steps.payload.outputs.version || '<not provided>' }}"
+          echo "Source image   : ${{ steps.payload.outputs.source-image }}:${{ steps.payload.outputs.tag }}"
+          echo "Target image   : ${{ steps.payload.outputs.target-image }}:${{ steps.payload.outputs.tag }}"
           echo "Source repo    : ${{ steps.payload.outputs.source-repo || '<not provided>' }}"
           echo "Source ref     : ${{ steps.payload.outputs.source-ref || '<not provided>' }}"
           echo "Source SHA     : ${{ steps.payload.outputs.source-sha || '<not provided>' }}"
 
-      - name: Simulate image publish
+      - name: Get GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repository: ${{ github.event.repository.name }}
+          permissions: 'packages:write,contents:read'
+
+      - name: Login to GitHub Container Registry
         env:
-          REGISTRY: ${{ steps.payload.outputs.registry }}
-          IMAGE_NAME: ${{ steps.payload.outputs.image-name }}
-          TAG: ${{ steps.payload.outputs.tag }}
-          PLATFORMS: ${{ steps.payload.outputs.platforms }}
+          GHCR_USER: x-access-token
+          GHCR_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          FULL_REF="${REGISTRY}/${IMAGE_NAME}:${TAG}"
-          echo "Preparing to push ${FULL_REF}"
-          if [ -n "${PLATFORMS}" ] && [ "${PLATFORMS}" != "[]" ]; then
-            echo "Requested platforms: ${PLATFORMS}"
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "GitHub App token is required to push to ghcr.io."
+            exit 1
           fi
-          echo "(Demo) docker pull ${FULL_REF}"
-          echo "(Demo) docker tag  ${FULL_REF} ${FULL_REF}"
-          echo "(Demo) docker push ${FULL_REF}"
-          echo "Image publish simulation complete."
+          echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GHCR_USER}" --password-stdin
+
+      - name: Pull source image
+        env:
+          SOURCE_IMAGE: ${{ steps.payload.outputs.source-image }}
+          TAG: ${{ steps.payload.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SOURCE_REF="${SOURCE_IMAGE}:${TAG}"
+          if [ -z "${SOURCE_IMAGE}" ] || [ -z "${TAG}" ]; then
+            echo "Source image or tag missing in dispatch payload."
+            exit 1
+          fi
+          echo "Pulling ${SOURCE_REF}"
+          docker pull "${SOURCE_REF}"
+
+      - name: Push image to GitHub Container Registry
+        env:
+          SOURCE_IMAGE: ${{ steps.payload.outputs.source-image }}
+          TARGET_IMAGE: ${{ steps.payload.outputs.target-image }}
+          TAG: ${{ steps.payload.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SOURCE_REF="${SOURCE_IMAGE}:${TAG}"
+          TARGET_REF="${TARGET_IMAGE}:${TAG}"
+          if [ -z "${TARGET_IMAGE}" ]; then
+            echo "Target image could not be determined."
+            exit 1
+          fi
+          echo "Tagging ${SOURCE_REF} as ${TARGET_REF}"
+          docker tag "${SOURCE_REF}" "${TARGET_REF}"
+          echo "Pushing ${TARGET_REF}"
+          docker push "${TARGET_REF}"
 
       - name: Summarize publish
         env:
@@ -76,7 +121,7 @@ jobs:
           IMAGE_NAME: ${{ steps.payload.outputs.image-name }}
           TAG: ${{ steps.payload.outputs.tag }}
           VERSION: ${{ steps.payload.outputs.version }}
-          PLATFORMS: ${{ steps.payload.outputs.platforms }}
+          TARGET_IMAGE: ${{ steps.payload.outputs.target-image }}
           SOURCE_REPO: ${{ steps.payload.outputs.source-repo }}
           SOURCE_REF: ${{ steps.payload.outputs.source-ref }}
           SOURCE_SHA: ${{ steps.payload.outputs.source-sha }}
@@ -88,11 +133,9 @@ jobs:
           fi
           {
             echo "### Deployment Engine Image Publish";
-            echo "- **Image**: ${REGISTRY}/${IMAGE_NAME}:${TAG}";
+            echo "- **Source Image**: ${REGISTRY}/${IMAGE_NAME}:${TAG}";
+            echo "- **Published Image**: ${TARGET_IMAGE}:${TAG}";
             echo "- **Version**: ${VERSION:-<not provided>}";
-            if [ "${PLATFORMS}" != "" ] && [ "${PLATFORMS}" != "[]" ]; then
-              echo "- **Platforms**: ${PLATFORMS}";
-            fi;
             if [ -n "${SOURCE_REPO}" ]; then
               echo "- **Source Repository**: ${SOURCE_REPO} (${SOURCE_REF:-ref missing})";
               echo "- **Source SHA**: ${SOURCE_SHA:-<not provided>}";
