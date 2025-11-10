@@ -12,6 +12,8 @@ permissions:
 jobs:
   publish-image:
     runs-on: ubuntu-latest
+    environment:
+      name: publish-de-image
 
     steps:
       - name: Capture payload
