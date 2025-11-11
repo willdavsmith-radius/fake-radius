@@ -34,10 +34,12 @@ jobs:
         id: payload
         shell: bash
         env:
-          IMAGE_NAME: ${{ github.event.client_payload.image_name || '' }}
+          SRC_IMAGE: ${{ github.event.client_payload.src_image || '' }}
+          DEST_IMAGE: ${{ github.event.client_payload.dest_image || '' }}
           TAG: ${{ github.event.client_payload.tag || '' }}
         run: |
-          echo "::set-output name=image-name::${IMAGE_NAME}"
+          echo "::set-output name=src_image::${SRC_IMAGE}"
+          echo "::set-output name=dest_image::${DEST_IMAGE}"
           echo "::set-output name=tag::${TAG}"
 
       - name: Get GitHub App token
@@ -59,6 +61,5 @@ jobs:
           GHCR_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           tag: ${{ steps.payload.outputs.tag }}
-          acr-source-name: ${{ vars.ACR_NAME }}
-          acr-source-repository: ${{ steps.payload.outputs.image-name }}
-          ghcr-destination-repository: ${{ steps.payload.outputs.target-repo }}
+          src_image: ${{ steps.payload.outputs.src_image }}
+          dest_image: ${{ steps.payload.outputs.dest_image }}

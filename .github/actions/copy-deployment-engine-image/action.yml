@@ -4,14 +4,11 @@ inputs:
   tag:
     description: Tag to apply to the destination image and pull from the source image.
     required: true
-  acr-source-name:
-    description: Name of the Azure Container Registry that hosts the deployment engine image.
+  src_image:
+    description: Name of the source image in Azure Container Registry (e.g. myregistry.azurecr.io/deployment-engine).
     required: true
-  acr-source-repository:
-    description: Repository name for the image inside the ACR.
-    required: true
-  ghcr-destination-repository:
-    description: Repository path in the destination registry.
+  dest_image:
+    description: Name of the GitHub Container Registry repository to push the deployment engine image to (e.g. ghcr.io/myorg/deployment-engine).
     required: true
 
 # Expected environment variables:
@@ -35,8 +32,13 @@ runs:
 
     - name: Log in to ACR
       shell: bash
+      env:
+        SRC_IMAGE: ${{ inputs.src_image }}
       run: |
-        az acr login --name "${{ inputs.acr-source-name }}"
+        # Example: SRC_IMAGE=myregistry.azurecr.io/deployment-engine -> REGISTRY_NAME=myregistry
+        REGISTRY="${SRC_IMAGE%%/*}"
+        REGISTRY_NAME="${REGISTRY%%.azurecr.io}"
+        az acr login --name "${REGISTRY_NAME}"
 
     - name: Log in to GHCR
       shell: bash
@@ -51,10 +53,9 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.tag }}
-        ACR_NAME: ${{ inputs.acr-source-name }}
-        SRC_REPO: ${{ inputs.acr-source-repository }}
-        DEST_REPO: ${{ inputs.ghcr-destination-repository }}
+        SRC_IMAGE: ${{ inputs.src_image }}
+        DEST_IMAGE: ${{ inputs.dest_image }}
       run: |
         docker buildx imagetools create \
-          --tag "ghcr.io/${DEST_REPO}:${TAG}" \
-          "${ACR_NAME}.azurecr.io/${SRC_REPO}:${TAG}"
+          --tag "${DEST_IMAGE}:${TAG}" \
+          "${SRC_IMAGE}:${TAG}"
