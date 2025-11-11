@@ -59,6 +59,6 @@ jobs:
           GHCR_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           tag: ${{ steps.payload.outputs.tag }}
-          acr-source-name: ${{ steps.payload.outputs.acr-name }}
+          acr-source-name: ${{ vars.ACR_NAME }}
           acr-source-repository: ${{ steps.payload.outputs.image-name }}
           ghcr-destination-repository: ${{ steps.payload.outputs.target-repo }}
