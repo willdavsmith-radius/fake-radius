@@ -58,8 +58,9 @@ jobs:
           ACR_AZURE_CLIENT_ID: ${{ secrets.ACR_AZURE_CLIENT_ID }}
           ACR_AZURE_TENANT_ID: ${{ secrets.ACR_AZURE_TENANT_ID }}
           ACR_AZURE_SUBSCRIPTION_ID: ${{ secrets.ACR_AZURE_SUBSCRIPTION_ID }}
-          GHCR_TOKEN: ${{ steps.app-token.outputs.token }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages#about-scopes-and-permissions-for-package-registries
           tag: ${{ steps.payload.outputs.tag }}
           src_image: ${{ steps.payload.outputs.src_image }}
           dest_image: ${{ steps.payload.outputs.dest_image }}
