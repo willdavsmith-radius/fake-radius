@@ -1,5 +1,5 @@
 name: Run Functional Tests
-run-name: "(Deployment Engine) Radius Functional Tests - ${{ github.event.client_payload.tag }}"
+run-name: "(Deployment Engine) Radius Functional Tests - Tag: ${{ github.event.client_payload.tag }}"
 
 on:
   repository_dispatch:
@@ -15,6 +15,8 @@ jobs:
     name: Simulate functional tests
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Capture payload
         id: payload
         shell: bash
@@ -24,6 +26,7 @@ jobs:
         run: |
           echo "::set-output name=image-name::${IMAGE_NAME}"
           echo "::set-output name=tag::${TAG}"
+
       - name: Simulate functional test run
         run: |
           echo: "Functional tests executed successfully."

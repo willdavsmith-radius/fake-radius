@@ -1,5 +1,5 @@
 name: Publish Deployment Engine Image
-run-name: "(Deployment Engine) Publish Image - ${{ github.event.client_payload.tag }}"
+run-name: "(Deployment Engine) Publish Image - Tag: ${{ github.event.client_payload.tag }}"
 
 on:
   workflow_dispatch:
@@ -28,6 +28,8 @@ jobs:
       name: publish-de-image
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Capture payload
         id: payload
         shell: bash
