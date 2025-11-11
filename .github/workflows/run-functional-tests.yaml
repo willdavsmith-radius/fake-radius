@@ -2,18 +2,29 @@ name: Run Functional Tests
 run-name: "(Deployment Engine) Radius Functional Tests - Tag: ${{ github.event.client_payload.tag }}"
 
 on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: 'Image name in GHCR (e.g. ghcr.io/myorg/deployment-engine)'
+        required: true
+        default: 'ghcr.io/myorg/deployment-engine'
+      tag:
+        description: 'Tag for the image (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
   repository_dispatch:
     types:
       - deployment-engine.run-functional-tests
 
-permissions:
-  contents: read
-  packages: read
+permissions: {}
 
 jobs:
   functional-tests:
     name: Simulate functional tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
 

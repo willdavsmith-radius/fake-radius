@@ -3,13 +3,23 @@ run-name: "(Deployment Engine) Publish Image - Tag: ${{ github.event.client_payl
 
 on:
   workflow_dispatch:
+    inputs:
+      src_image:
+        description: 'Source image in ACR (e.g. myregistry.azurecr.io/deployment-engine)'
+        required: true
+        default: 'myregistry.azurecr.io/deployment-engine'
+      dest_image:
+        description: 'Destination image in GHCR (e.g. ghcr.io/myorg/deployment-engine)'
+        required: true
+        default: 'ghcr.io/myorg/deployment-engine'
+      tag:
+        description: 'Tag for the image (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
   repository_dispatch:
     types: [deployment-engine.publish]
 
-permissions:
-  contents: read
-  packages: write
-  id-token: write
+permissions: {}
 
 # variables from GitHub organization
   # ${{ vars.ACR_NAME }}
@@ -26,7 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: publish-de-image
-
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -42,24 +54,14 @@ jobs:
           echo "::set-output name=dest_image::${DEST_IMAGE}"
           echo "::set-output name=tag::${TAG}"
 
-      - name: Get GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repository: ${{ github.event.repository.name }}
-          permissions: 'packages:write,contents:read'
-
       - name: Copy Deployment Engine image
         uses: ./.github/actions/copy-deployment-engine-image
         env:
           ACR_AZURE_CLIENT_ID: ${{ secrets.ACR_AZURE_CLIENT_ID }}
           ACR_AZURE_TENANT_ID: ${{ secrets.ACR_AZURE_TENANT_ID }}
           ACR_AZURE_SUBSCRIPTION_ID: ${{ secrets.ACR_AZURE_SUBSCRIPTION_ID }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # Blocker: Need GitHub PAT to push to GHCR.
           # https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages#about-scopes-and-permissions-for-package-registries
           tag: ${{ steps.payload.outputs.tag }}
           src_image: ${{ steps.payload.outputs.src_image }}
