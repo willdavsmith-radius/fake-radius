@@ -36,7 +36,7 @@ runs:
     - name: Log in to ACR
       shell: bash
       run: |
-        az acr login --name "${{ inputs.acr-name }}"
+        az acr login --name "${{ inputs.acr-source-name }}"
 
     - name: Log in to GHCR
       shell: bash
