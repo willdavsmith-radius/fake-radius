@@ -8,6 +8,17 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+
+# variables from GitHub organization
+  # ${{ vars.ACR_NAME }}
+
+# secrets from GitHub organization
+  # ${{ secrets.GH_APP_ID }}
+  # ${{ secrets.GH_APP_PRIVATE_KEY }}
+  # ${{ secrets.ACR_AZURE_CLIENT_ID }}
+  # ${{ secrets.ACR_AZURE_TENANT_ID }}
+  # ${{ secrets.ACR_AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   publish-image:
@@ -18,50 +29,13 @@ jobs:
     steps:
       - name: Capture payload
         id: payload
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const payload = context.payload.client_payload || {};
-            if (!payload.registry || !payload.image_name || !payload.tag) {
-              core.setFailed('registry, image_name, and tag are required in the dispatch payload.');
-              return;
-            }
-
-            const publish = (key, value) => core.setOutput(key, value || '');
-
-            const owner = (context.repo.owner || '').toLowerCase();
-            const imageName = (payload.image_name || '').toLowerCase();
-            const registry = payload.registry.replace(/\/+$/, '');
-            const sourceImage = `${registry}/${payload.image_name}`;
-            const targetImage = owner && imageName ? `ghcr.io/${owner}/${imageName}` : '';
-            if (!targetImage) {
-              core.setFailed('Unable to determine GHCR image path for publish.');
-              return;
-            }
-
-            publish('registry', registry);
-            publish('image-name', payload.image_name);
-            publish('tag', payload.tag);
-            publish('version', payload.version || '');
-            publish('source-image', sourceImage);
-            publish('target-image', targetImage);
-            publish('source-repo', payload.source_repo || '');
-            publish('source-owner', payload.source_owner || '');
-            publish('source-repo-name', payload.source_repo_name || '');
-            publish('source-ref', payload.source_ref || '');
-            publish('source-sha', payload.source_sha || '');
-
-      - name: Show publish parameters
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ github.event.client_payload.image_name || '' }}
+          TAG: ${{ github.event.client_payload.tag || '' }}
         run: |
-          echo "Registry       : ${{ steps.payload.outputs.registry }}"
-          echo "Image name     : ${{ steps.payload.outputs.image-name }}"
-          echo "Tag            : ${{ steps.payload.outputs.tag }}"
-          echo "Version        : ${{ steps.payload.outputs.version || '<not provided>' }}"
-          echo "Source image   : ${{ steps.payload.outputs.source-image }}:${{ steps.payload.outputs.tag }}"
-          echo "Target image   : ${{ steps.payload.outputs.target-image }}:${{ steps.payload.outputs.tag }}"
-          echo "Source repo    : ${{ steps.payload.outputs.source-repo || '<not provided>' }}"
-          echo "Source ref     : ${{ steps.payload.outputs.source-ref || '<not provided>' }}"
-          echo "Source SHA     : ${{ steps.payload.outputs.source-sha || '<not provided>' }}"
+          echo "::set-output name=image-name::${IMAGE_NAME}"
+          echo "::set-output name=tag::${TAG}"
 
       - name: Get GitHub App token
         id: app-token
@@ -73,80 +47,15 @@ jobs:
           repository: ${{ github.event.repository.name }}
           permissions: 'packages:write,contents:read'
 
-      - name: Login to GitHub Container Registry
+      - name: Copy Deployment Engine image
+        uses: ./.github/actions/copy-deployment-engine-image
         env:
-          GHCR_USER: x-access-token
+          ACR_AZURE_CLIENT_ID: ${{ secrets.ACR_AZURE_CLIENT_ID }}
+          ACR_AZURE_TENANT_ID: ${{ secrets.ACR_AZURE_TENANT_ID }}
+          ACR_AZURE_SUBSCRIPTION_ID: ${{ secrets.ACR_AZURE_SUBSCRIPTION_ID }}
           GHCR_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GHCR_TOKEN}" ]; then
-            echo "GitHub App token is required to push to ghcr.io."
-            exit 1
-          fi
-          echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GHCR_USER}" --password-stdin
-
-      - name: Pull source image
-        env:
-          SOURCE_IMAGE: ${{ steps.payload.outputs.source-image }}
-          TAG: ${{ steps.payload.outputs.tag }}
-        run: |
-          set -euo pipefail
-          SOURCE_REF="${SOURCE_IMAGE}:${TAG}"
-          if [ -z "${SOURCE_IMAGE}" ] || [ -z "${TAG}" ]; then
-            echo "Source image or tag missing in dispatch payload."
-            exit 1
-          fi
-          echo "Pulling ${SOURCE_REF}"
-          docker pull "${SOURCE_REF}"
-
-      - name: Push image to GitHub Container Registry
-        env:
-          SOURCE_IMAGE: ${{ steps.payload.outputs.source-image }}
-          TARGET_IMAGE: ${{ steps.payload.outputs.target-image }}
-          TAG: ${{ steps.payload.outputs.tag }}
-        run: |
-          set -euo pipefail
-          SOURCE_REF="${SOURCE_IMAGE}:${TAG}"
-          TARGET_REF="${TARGET_IMAGE}:${TAG}"
-          if [ -z "${TARGET_IMAGE}" ]; then
-            echo "Target image could not be determined."
-            exit 1
-          fi
-          echo "Tagging ${SOURCE_REF} as ${TARGET_REF}"
-          docker tag "${SOURCE_REF}" "${TARGET_REF}"
-          echo "Pushing ${TARGET_REF}"
-          docker push "${TARGET_REF}"
-
-      - name: Summarize publish
-        env:
-          REGISTRY: ${{ steps.payload.outputs.registry }}
-          IMAGE_NAME: ${{ steps.payload.outputs.image-name }}
-          TAG: ${{ steps.payload.outputs.tag }}
-          VERSION: ${{ steps.payload.outputs.version }}
-          TARGET_IMAGE: ${{ steps.payload.outputs.target-image }}
-          SOURCE_REPO: ${{ steps.payload.outputs.source-repo }}
-          SOURCE_REF: ${{ steps.payload.outputs.source-ref }}
-          SOURCE_SHA: ${{ steps.payload.outputs.source-sha }}
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-        run: |
-          PAYLOAD_DISPLAY="${CLIENT_PAYLOAD}"
-          if [ "${PAYLOAD_DISPLAY}" = "null" ] || [ -z "${PAYLOAD_DISPLAY}" ]; then
-            PAYLOAD_DISPLAY="{}"
-          fi
-          {
-            echo "### Deployment Engine Image Publish";
-            echo "- **Source Image**: ${REGISTRY}/${IMAGE_NAME}:${TAG}";
-            echo "- **Published Image**: ${TARGET_IMAGE}:${TAG}";
-            echo "- **Version**: ${VERSION:-<not provided>}";
-            if [ -n "${SOURCE_REPO}" ]; then
-              echo "- **Source Repository**: ${SOURCE_REPO} (${SOURCE_REF:-ref missing})";
-              echo "- **Source SHA**: ${SOURCE_SHA:-<not provided>}";
-            fi;
-            echo "";
-            echo "<details><summary>Dispatch Payload</summary>";
-            echo "";
-            echo '```json';
-            echo "${PAYLOAD_DISPLAY}";
-            echo '```';
-            echo "</details>";
-          } >> "$GITHUB_STEP_SUMMARY"
+        with:
+          tag: ${{ steps.payload.outputs.tag }}
+          acr-source-name: ${{ steps.payload.outputs.acr-name }}
+          acr-source-repository: ${{ steps.payload.outputs.image-name }}
+          ghcr-destination-repository: ${{ steps.payload.outputs.target-repo }}

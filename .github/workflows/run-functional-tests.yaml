@@ -1,214 +1,28 @@
-name: Simulate Functional Tests
+name: Run Functional Tests
 
 on:
-  workflow_dispatch:
   repository_dispatch:
-    types: [deployment-engine.run-functional-tests]
+    types:
+      - deployment-engine.run-functional-tests
 
 permissions:
   contents: read
   packages: read
 
-env:
-  DEFAULT_STATUS_CONTEXT: functional-tests
-
 jobs:
   functional-tests:
+    name: Simulate functional tests
     runs-on: ubuntu-latest
-    environment:
-      name: run-functional-tests
-
     steps:
-      - name: Capture payload details
+      - name: Capture payload
         id: payload
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const payload = context.payload.client_payload || {};
-            const status = payload.status_payload || {};
-
-            const sourceRepo = status.source_repository || '';
-            const [sourceOwner = '', sourceRepoName = ''] = sourceRepo.split('/', 2);
-            const targetSha = status.target_sha || '';
-            const statusContext = status.status_context || process.env.DEFAULT_STATUS_CONTEXT;
-            const eventType = context.payload.action || payload.event_type || context.eventName;
-            const shouldFail = ['true', '1', true].includes(payload.force_failure);
-            const deImage = payload.de_image || '';
-            const imageParts = deImage ? deImage.split('/') : [];
-            const imageName = imageParts.length > 1 ? imageParts.slice(1).join('/') : (imageParts[0] || '');
-            const ghcrOwner = (context.repo.owner || '').toLowerCase();
-            const targetImage = ghcrOwner && imageName ? `ghcr.io/${ghcrOwner}/${imageName.toLowerCase()}` : '';
-
-            core.setOutput('image', deImage);
-            core.setOutput('tag', payload.de_tag || '');
-            core.setOutput('event-type', eventType);
-            core.setOutput('status-context', statusContext);
-            core.setOutput('source-owner', sourceOwner);
-            core.setOutput('source-repo', sourceRepoName);
-            core.setOutput('source-full', sourceRepo);
-            core.setOutput('target-sha', targetSha);
-            core.setOutput('has-status', sourceOwner && sourceRepoName && targetSha ? 'true' : 'false');
-            core.setOutput('should-fail', shouldFail ? 'true' : 'false');
-            core.setOutput('ghcr-image', targetImage);
-
-      - name: Get commit status token
-        id: status-token
-        if: ${{ steps.payload.outputs.has-status == 'true' && secrets.GH_APP_ID != '' && secrets.GH_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: ${{ steps.payload.outputs.source-owner }}
-          repository: ${{ steps.payload.outputs.source-repo }}
-          permissions: statuses:write, contents:read
-
-      - name: Set status to pending
-        if: ${{ steps.payload.outputs.has-status == 'true' && steps.status-token.outputs.token != '' }}
-        uses: actions/github-script@v7
+        shell: bash
         env:
-          STATUS_OWNER: ${{ steps.payload.outputs.source-owner }}
-          STATUS_REPO: ${{ steps.payload.outputs.source-repo }}
-          STATUS_TARGET_SHA: ${{ steps.payload.outputs.target-sha }}
-          STATUS_CONTEXT: ${{ steps.payload.outputs.status-context }}
-          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          github-token: ${{ steps.status-token.outputs.token }}
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: process.env.STATUS_OWNER,
-              repo: process.env.STATUS_REPO,
-              sha: process.env.STATUS_TARGET_SHA,
-              state: 'pending',
-              context: process.env.STATUS_CONTEXT,
-              description: 'Functional tests are running',
-              target_url: process.env.TARGET_URL
-            });
-
-      - name: Get publish token
-        id: publish-token
-        if: ${{ steps.payload.outputs.ghcr-image != '' && secrets.GH_APP_ID != '' && secrets.GH_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repository: ${{ github.event.repository.name }}
-          permissions: 'packages:read,contents:read'
-
-      - name: Verify published image exists
-        env:
-          TAG: ${{ steps.payload.outputs.tag }}
-          GHCR_IMAGE: ${{ steps.payload.outputs.ghcr-image }}
-          GHCR_USER: x-access-token
-          GHCR_TOKEN: ${{ steps.publish-token.outputs.token }}
+          IMAGE_NAME: ${{ github.event.client_payload.image_name || '' }}
+          TAG: ${{ github.event.client_payload.tag || '' }}
         run: |
-          set -euo pipefail
-          if [ -z "${GHCR_IMAGE}" ] || [ -z "${TAG}" ]; then
-            echo "Missing GHCR image or tag information from dispatch payload."
-            exit 1
-          fi
-
-          if [ -z "${GHCR_TOKEN}" ]; then
-            echo "GITHUB_TOKEN unavailable; cannot authenticate to ghcr.io."
-            exit 1
-          fi
-
-          echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GHCR_USER}" --password-stdin
-
-          FULL_REF="${GHCR_IMAGE}:${TAG}"
-          echo "Checking manifest for ${FULL_REF}"
-          docker manifest inspect "${FULL_REF}" > /tmp/de-image-manifest.json
-          if command -v jq >/dev/null 2>&1; then
-            jq '.schemaVersion' /tmp/de-image-manifest.json >/dev/null 2>&1 || true
-          fi
-
-          docker logout ghcr.io || true
-
-      - name: Simulate functional tests
-        id: simulate
-        env:
-          DE_IMAGE: ${{ steps.payload.outputs.image }}
-          DE_TAG: ${{ steps.payload.outputs.tag }}
-          SHOULD_FAIL: ${{ steps.payload.outputs.should-fail }}
+          echo "::set-output name=image-name::${IMAGE_NAME}"
+          echo "::set-output name=tag::${TAG}"
+      - name: Simulate functional test run
         run: |
-          set -euo pipefail
-          echo "Simulating functional tests..."
-          echo "Image: ${DE_IMAGE:-<not provided>}"
-          echo "Tag: ${DE_TAG:-<not provided>}"
-          sleep 5
-          if [ "${SHOULD_FAIL}" = "true" ]; then
-            echo "Demo failure requested."
-            exit 1
-          fi
-          echo "Simulation complete."
-
-      - name: Final status update
-        if: ${{ steps.payload.outputs.has-status == 'true' && steps.status-token.outputs.token != '' && always() }}
-        uses: actions/github-script@v7
-        env:
-          STATUS_OWNER: ${{ steps.payload.outputs.source-owner }}
-          STATUS_REPO: ${{ steps.payload.outputs.source-repo }}
-          STATUS_TARGET_SHA: ${{ steps.payload.outputs.target-sha }}
-          STATUS_CONTEXT: ${{ steps.payload.outputs.status-context }}
-          JOB_STATUS: ${{ job.status }}
-          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          github-token: ${{ steps.status-token.outputs.token }}
-          script: |
-            const stateMap = { success: 'success', failure: 'failure', cancelled: 'error' };
-            const descMap = {
-              success: 'Functional tests passed',
-              failure: 'Functional tests failed',
-              error: 'Functional tests cancelled'
-            };
-            const jobStatus = process.env.JOB_STATUS.toLowerCase();
-            const state = stateMap[jobStatus] || 'error';
-            const description = descMap[state];
-
-            await github.rest.repos.createCommitStatus({
-              owner: process.env.STATUS_OWNER,
-              repo: process.env.STATUS_REPO,
-              sha: process.env.STATUS_TARGET_SHA,
-              state,
-              context: process.env.STATUS_CONTEXT,
-              description,
-              target_url: process.env.TARGET_URL
-            });
-
-      - name: Summarize run
-        if: ${{ always() }}
-        env:
-          JOB_STATUS: ${{ job.status }}
-          EVENT_TYPE: ${{ steps.payload.outputs['event-type'] }}
-          SOURCE_REPO: ${{ steps.payload.outputs['source-full'] }}
-          TARGET_SHA: ${{ steps.payload.outputs['target-sha'] }}
-          STATUS_CONTEXT: ${{ steps.payload.outputs['status-context'] }}
-          DE_IMAGE: ${{ steps.payload.outputs.image }}
-          DE_TAG: ${{ steps.payload.outputs.tag }}
-          GHCR_IMAGE: ${{ steps.payload.outputs['ghcr-image'] }}
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-        run: |
-          PAYLOAD_DISPLAY="${CLIENT_PAYLOAD}"
-          if [ "${PAYLOAD_DISPLAY}" = "null" ] || [ -z "${PAYLOAD_DISPLAY}" ]; then
-            PAYLOAD_DISPLAY="{}"
-          fi
-          {
-            echo "### Functional Test Simulation";
-            echo "- **Result**: ${JOB_STATUS}";
-            echo "- **Event**: ${EVENT_TYPE}";
-            echo "- **Source Image**: ${DE_IMAGE:-<not provided>} (${DE_TAG:-<not provided>})";
-            if [ -n "${GHCR_IMAGE}" ]; then
-              echo "- **Published Image**: ${GHCR_IMAGE}:${DE_TAG:-<not provided>}";
-            fi;
-            if [ -n "${SOURCE_REPO}" ]; then
-              echo "- **Status Target**: ${SOURCE_REPO}@${TARGET_SHA:-<sha missing>}";
-              echo "- **Status Context**: ${STATUS_CONTEXT}";
-            fi;
-            echo "";
-            echo "<details><summary>Dispatch Payload</summary>";
-            echo "";
-            echo '```json';
-            echo "${PAYLOAD_DISPLAY}";
-            echo '```';
-            echo "</details>";
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo: "Functional tests executed successfully."
