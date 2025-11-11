@@ -1,4 +1,5 @@
 name: Publish Deployment Engine Image
+run-name: "(Deployment Engine) Publish Image - ${{ github.event.client_payload.tag }}"
 
 on:
   workflow_dispatch:

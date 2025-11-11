@@ -1,4 +1,5 @@
 name: Run Functional Tests
+run-name: "(Deployment Engine) Radius Functional Tests - ${{ github.event.client_payload.tag }}"
 
 on:
   repository_dispatch:
