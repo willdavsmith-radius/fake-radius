@@ -51,9 +51,9 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.tag }}
-        ACR_NAME: ${{ inputs.acr-name }}
-        SRC_REPO: ${{ inputs.source-repository }}
-        DEST_REPO: ${{ inputs.destination-repository }}
+        ACR_NAME: ${{ inputs.acr-source-name }}
+        SRC_REPO: ${{ inputs.acr-source-repository }}
+        DEST_REPO: ${{ inputs.ghcr-destination-repository }}
       run: |
         docker buildx imagetools create \
           --tag "ghcr.io/${DEST_REPO}:${TAG}" \
