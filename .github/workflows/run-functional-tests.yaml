@@ -24,7 +24,7 @@ jobs:
           IMAGE_NAME: ${{ github.event.client_payload.image_name || '' }}
           TAG: ${{ github.event.client_payload.tag || '' }}
         run: |
-          echo "::set-output name=image-name::${IMAGE_NAME}"
+          echo "::set-output name=image_name::${IMAGE_NAME}"
           echo "::set-output name=tag::${TAG}"
 
       - name: Simulate functional test run
