@@ -42,4 +42,4 @@ jobs:
 
       - name: Simulate functional test run
         run: |
-          echo: "Functional tests executed successfully."
+          echo "Functional tests executed successfully."
