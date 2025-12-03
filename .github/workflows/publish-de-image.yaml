@@ -50,9 +50,11 @@ jobs:
           DEST_IMAGE: ${{ github.event.client_payload.dest_image || '' }}
           TAG: ${{ github.event.client_payload.tag || '' }}
         run: |
-          echo "::set-output name=src_image::${SRC_IMAGE}"
-          echo "::set-output name=dest_image::${DEST_IMAGE}"
-          echo "::set-output name=tag::${TAG}"
+          {
+            echo "src_image=${SRC_IMAGE}"
+            echo "dest_image=${DEST_IMAGE}"
+            echo "tag=${TAG}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Copy Deployment Engine image
         uses: ./.github/actions/copy-deployment-engine-image
@@ -61,7 +63,7 @@ jobs:
           ACR_AZURE_TENANT_ID: ${{ secrets.ACR_AZURE_TENANT_ID }}
           ACR_AZURE_SUBSCRIPTION_ID: ${{ secrets.ACR_AZURE_SUBSCRIPTION_ID }}
         with:
-          # Blocker: Need GitHub PAT to push to GHCR.
+          # In the real world, need GitHub PAT to push to GHCR.
           # https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages#about-scopes-and-permissions-for-package-registries
           tag: ${{ steps.payload.outputs.tag }}
           src_image: ${{ steps.payload.outputs.src_image }}
